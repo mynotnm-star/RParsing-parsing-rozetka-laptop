@@ -1,15 +1,15 @@
 import asyncio
 import json
 import logging
+import random
 from typing import List, Dict, Any
 from playwright.async_api import async_playwright, Response
-import os
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 class RozetkaScraper:
-    def __init__(self, base_page_count: int = 78):
+    def __init__(self, base_page_count: int = 73):
         self.base_url = "https://rozetka.com.ua/ua/notebooks/c80004/page={}/"
         self.page_count = base_page_count
         self.all_products: List[Dict[str, Any]] = []
@@ -22,43 +22,54 @@ class RozetkaScraper:
             "--no-sandbox",
             "--disable-infobars"
         ]
+
     def menu(self):
         asciiart = '''
          ░█████████   ░█████████                                            
-         ░██     ░██  ░██     ░██                                           
-         ░██     ░██  ░██     ░██  ░██████    ░██░████  ░███████   ░███████  
-         ░█████████   ░█████████        ░██   ░███      ░██        ░██    ░██ 
-         ░██   ░██    ░██           ░███████  ░██       ░███████   ░█████████ 
-         ░██    ░██   ░██          ░██   ░██  ░██              ░██ ░██        
-         ░██     ░██  ░██          ░█████░██  ░██       ░███████    ░███████  
-                '''
+         ░██    ░██  ░██    ░██                                            
+         ░██    ░██  ░██    ░██  ░██████    ░██░████  ░███████   ░███████  
+         ░█████████   ░█████████         ░██    ░███      ░██        ░██    ░██ 
+         ░██    ░██   ░██             ░███████  ░██       ░███████   ░█████████ 
+         ░██    ░██  ░██             ░██   ░██  ░██                ░██ ░██      
+         ░██     ░██  ░██            ░█████░██  ░██       ░███████    ░███████  
+                                                                                 '''
         print(asciiart)
         print("=" * 68)
-        print("                ROZETKA SPECTRE INTERCEPTOR v2.0            ")
+        print("                ROZETKA SPECTRE INTERCEPTOR v2.0              ")
         print("=" * 68)
+        
+        # Prompt user to choose whether to include the seller=other filter
+        filter_choice = input('Use "seller=other" filter? (y/N): ').strip().lower()
+        if filter_choice in ['y', 'yes']:
+            self.base_url = "https://rozetka.com.ua/ua/notebooks/c80004/page={};seller=other/"
+            logger.info("Seller filter enabled: seller=other")
+            
         user_choice = input('Start parsing? (Y/n): ').strip().lower()
         if user_choice in ['y', 'yes', '']:
             logger.info("Starting extraction engine...")
         else:
             logger.info("Operation cancelled by user. Exiting.")
             exit()
+
     async def _json_sniffer(self, response: Response) -> None:
         """Intercepts network responses and extracts product metadata from API."""
-        if "api/product/details" in response.url:
+        if "api/product/details" in response.url or "api" in response.url:
             try:
                 payload = await response.json()
-                if "data" in payload and isinstance(payload["data"], list):
-                    for item in payload["data"]:
-                        product_info = {
-                            "id": item.get("id"),
-                            "title": item.get("title"),
-                            "href": item.get("href")
-                        }
-                        if product_info not in self.all_products:
-                            self.all_products.append(product_info)
-                            logger.info(f"Intercepted product: {product_info['title'][:50]}...")
+                if isinstance(payload, dict):
+                    data = payload.get("data", [])
+                    if isinstance(data, list):
+                        for item in data:
+                            product_info = {
+                                "id": item.get("id"),
+                                "title": item.get("title"),
+                                "href": item.get("href"),
+                                "price": item.get("price")
+                            }
+                            if product_info not in self.all_products and product_info.get("title"):
+                                self.all_products.append(product_info)
+                                logger.info(f"Intercepted product: {product_info['title'][:40]}...")
             except Exception:
-                # Silently pass JSON parsing errors (e.g., HTTP 204 or invalid responses)
                 pass
 
     async def run(self) -> None:
@@ -76,10 +87,10 @@ class RozetkaScraper:
             
             page = await context.new_page()
             
-            # Injecting script to completely neutralize navigator.webdriver flag
+            # Neutralize navigator.webdriver flag
             await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
-            # Attaching the asynchronous network interceptor
+            # Attach network sniffer
             page.on("response", self._json_sniffer)
 
             for page_num in range(1, self.page_count + 1):
@@ -88,17 +99,17 @@ class RozetkaScraper:
                 
                 try:
                     await page.goto(target_url, wait_until="commit", timeout=25000)
-                    await asyncio.sleep(3.0)  # Grace period for Cloudflare/Proxy challenge layers
+                    await asyncio.sleep(random.uniform(2.0, 4.0))  # Human-like delay
                     
                     page_title = await page.title()
                     if "checking" in page_title.lower() or "just a moment" in page_title.lower():
-                        logger.warning("Cloudflare challenge page triggered! Manual bypass required if prompted.")
-                        await asyncio.sleep(5.0)
+                        logger.warning("Cloudflare challenge triggered! Waiting...")
+                        await asyncio.sleep(6.0)
 
-                    # Simulating human scroll behavior to trigger lazy loading and API requests
+                    # Human-like scrolling to trigger lazy load and API requests
                     for _ in range(8):
-                        await page.evaluate("window.scrollBy(0, 1000);")
-                        await asyncio.sleep(0.9)
+                        await page.mouse.wheel(0, random.randint(300, 600))
+                        await asyncio.sleep(random.uniform(0.5, 1.0))
                         
                 except Exception as e:
                     logger.error(f"Execution failed on page {page_num}: {e}")
@@ -118,6 +129,6 @@ class RozetkaScraper:
             logger.error("Dataset is empty. High anti-bot activity or breaking structural changes on host side.")
 
 if __name__ == "__main__":
-    scraper = RozetkaScraper(base_page_count=78)
+    scraper = RozetkaScraper(base_page_count=73)
     scraper.menu()
     asyncio.run(scraper.run())
